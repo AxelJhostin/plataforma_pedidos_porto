@@ -1,0 +1,11 @@
+# Dependencias y archivos generados por TypeScript
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Configuración local y archivos temporales
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store

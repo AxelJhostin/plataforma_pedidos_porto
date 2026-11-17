@@ -1,6 +1,8 @@
 import express, {Request, Response} from 'express';
 import {randomUUID} from "node:crypto";
 import {medirLatencia, resumenMetricas} from "./metricas";
+import {contarPrimosEnWorker} from "./worker-reporte";
+import {contarPrimosEnPool, estadoPool, PoolLleno} from "./pool";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const INVENTARIO_URL = process.env.INVENTARIO_URL ?? 'http://localhost:3001';
@@ -19,7 +21,7 @@ app.use(express.json());
 app.use(medirLatencia);
 
 app.get("/metricas", (_req: Request, res: Response) => {
-    res.json(resumenMetricas());
+    res.json({...resumenMetricas(), pool: estadoPool()});
 });
 
 app.get("/reporte/bloqueante", (_req: Request, res: Response) => {
@@ -28,6 +30,42 @@ app.get("/reporte/bloqueante", (_req: Request, res: Response) => {
         // Simula el cálculo pesado de la práctica guiada en el hilo principal.
     }
     res.json({reporte: "completado"});
+});
+
+function numeroPrimosQuery(req: Request, res: Response): number | undefined {
+    const n = Number(req.query.n);
+    if (!Number.isSafeInteger(n) || n < 2) {
+        res.status(400).json({error: "n debe ser un entero mayor o igual que 2"});
+        return undefined;
+    }
+    return n;
+}
+
+app.get("/reporte/worker", async (req: Request, res: Response) => {
+    const n = numeroPrimosQuery(req, res);
+    if (n === undefined) return;
+    try {
+        const primos = await contarPrimosEnWorker(n);
+        res.json({n, primos, modo: "worker"});
+    } catch (error) {
+        res.status(500).json({error: error instanceof Error ? error.message : String(error)});
+    }
+});
+
+app.get("/reporte/pool", async (req: Request, res: Response) => {
+    const n = numeroPrimosQuery(req, res);
+    if (n === undefined) return;
+    try {
+        const primos = await contarPrimosEnPool(n);
+        res.json({n, primos, modo: "pool"});
+    } catch (error) {
+        if (error instanceof PoolLleno) {
+            res.setHeader("Retry-After", "1");
+            res.status(503).json({error: error.message, pool: estadoPool()});
+            return;
+        }
+        res.status(500).json({error: error instanceof Error ? error.message : String(error)});
+    }
 });
 
 app.get("/health", (_req: Request, res: Response) => {
